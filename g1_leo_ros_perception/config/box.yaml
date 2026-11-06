@@ -1,0 +1,26 @@
+#yoloe_logo_box_vision:
+/**:
+  ros__parameters:
+    # Ruta ABSOLUTA a tu foto con la caja plegada.
+
+    # Rectángulos de píxeles sobre ESA fotografía: [xmin,ymin,xmax,ymax].
+    # La caja puede usar toda la imagen si está completamente recortada.
+    reference_box_xyxy: [0, 32.0, 616.0, 470.0]
+
+    # OBLIGATORIOS: reemplazar por coordenadas reales de las dos palabras.
+    repsol_box_xyxy: [262.0, 203.0, 535.0, 247.0]
+    lubricants_box_xyxy: [264.0, 273.0, 551.0, 314.0]
+
+    model: 'yoloe-26s-seg.pt'
+    device: '0'                   # '0' para CUDA disponible
+    confidence: 0.30
+    imgsz: 640
+    max_hz: 2.0
+    grasp_span_factor: 0.8
+
+    # RealSense (depth alineada a color)
+    color_topic: '/camera/camera/color/image_raw'
+    depth_topic: '/camera/camera/aligned_depth_to_color/image_raw'
+    camera_info_topic: '/camera/camera/color/camera_info'
+    sync_slop_s: 0.10
+    depth_scale_m: 0.001
