@@ -8,6 +8,20 @@ ROS 2 workspace for the Unitree G1 robot.
 - ROS 2 Humble
 - Python 3
 
+## Architecture
+
+The repository follows a modular ROS 2 architecture.
+
+```text
+g1_leo_ros/
+├── g1_leo_ros_bringup/       # System launch files
+├── g1_leo_ros_hardware/      # Hardware interface
+├── g1_leo_ros_description/   # Robot description
+└── g1_leo_ros_perception/    # Perception modules
+```
+
+The system is managed through a centralized bringup, supporting a shared ROS 2 namespace.
+
 ## Installation
 
 Clone the repository into a ROS 2 workspace and build:
