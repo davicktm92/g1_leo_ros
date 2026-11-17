@@ -112,6 +112,7 @@ class locomotion_teleop(Node):
 			self.m_speed.angular.z=self.scale_angular_turbo*self.joy_msg.axes[self.axis_angular]
 		else:
 			self.m_speed.linear.x=0.0
+			self.m_speed.linear.y=0.0
 			self.m_speed.angular.z=0.0
 		
 		#condicion y publicacion de la velocidad

@@ -146,7 +146,7 @@ class G1CartesianModeNode(Node):
             "kd_hold": 2.0,
             # Perfil PD por indices de xr_teleoperate (G1 29 DoF).
             # Permite ajustar hombros/codos, munecas y cintura de forma independiente.
-            "xr_kp_high": 200.0,   # cintura 12..14 y motores fuertes 300.0 de xr
+            "xr_kp_high": 250.0,   # cintura 12..14 y motores fuertes 300.0 de xr
             "xr_kd_high": 3.0,     # cintura 12..14 y motores fuertes 3.0 de xr
             "xr_kp_low": 80.0,     # hombros/codos 15..18 y 22..25 80.0 de xr
             "xr_kd_low": 3.0,      # hombros/codos 15..18 y 22..25 3.0 de xr
