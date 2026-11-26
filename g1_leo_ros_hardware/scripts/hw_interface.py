@@ -169,7 +169,7 @@ class G1CartesianModeNode(Node):
             "arm_velocity_timeout": 0.3,      # s sin mensaje → velocidad 0
             "arm_velocity_rate": 50.0,        # Hz del bucle de IK por velocidad
             "max_arm_linear_speed": 0.15,     # m/s, saturación de seguridad
-            "max_cartesian_offset": 0.25,     # m, caja de trabajo alrededor de la pose inicial
+            "max_cartesian_offset": 0.75,     # m, caja de trabajo alrededor de la pose inicial
             "cartesian_windup_limit": 0.03,   # m, anti-acumulación del objetivo
             "max_vx": 0.4,
             "max_vy": 0.3,
@@ -180,7 +180,7 @@ class G1CartesianModeNode(Node):
             "mode3_max_wz": 0.5,
 
             "max_arm_angular_speed": 1.0,      # rad/s, saturación angular de muñeca
-            "max_angular_offset": 0.8,         # rad, giro máximo por eje respecto a la orientación inicial
+            "max_angular_offset": 1.8,         # rad, giro máximo por eje respecto a la orientación inicial
             "orientation_windup_limit": 0.15,  # rad, anti-acumulación de orientación
 
 
