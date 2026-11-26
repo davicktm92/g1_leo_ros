@@ -137,7 +137,7 @@ class G1CartesianModeNode(Node):
             "lowstate_timeout": 1.0,
             "max_waypoints": 50,
             "max_ik_iterations": 10,
-            "position_tolerance": 0.03,
+            "position_tolerance": 0.10,
             "orientation_tolerance": 0.25,
             "max_joint_velocity": 1.0,
             "kp_active": 60.0,

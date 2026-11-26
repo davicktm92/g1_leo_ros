@@ -61,6 +61,16 @@ def generate_launch_description():
         ),
     )
 
+    manipulation=IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            PathJoinSubstitution([
+                FindPackageShare("g1_leo_ros_manipulation"),
+                "launch",
+                "manipulation.launch.py",
+            ])
+        ),
+    )
+
     return LaunchDescription([
         GroupAction([
             PushRosNamespace(namespace),
@@ -68,5 +78,6 @@ def generate_launch_description():
             locomotion,
             arms_teleop,
             perception,
+            manipulation,
         ]),
     ])

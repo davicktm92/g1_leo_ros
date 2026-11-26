@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
 
+import threading
 import time
+import traceback
 
 import numpy as np
 import rclpy
 from geometry_msgs.msg import Twist
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import Joy
-from std_msgs.msg import Int8
+from std_msgs.msg import Int8, String
 from builtin_interfaces.msg import Duration
 from trajectory_msgs.msg import MultiDOFJointTrajectory, MultiDOFJointTrajectoryPoint
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+
+try:
+	import tkinter as tk
+except ImportError:            # sin tkinter no hay ventana: sudo apt install python3-tk
+	tk = None
 
 try:
 	from unitree_hg.msg import HandCmd, HandState, MotorCmd
@@ -29,6 +37,100 @@ HAND_POSES_LEFT = {
 	"closed": [0.0, 0.8, 0.1, -1.0, -0.4, -1.0, -0.4],    # L2: cerrada
 	"fist":   [0.0, 1.0, 1.5, -1.5, -1.6, -1.5, -1.6],    # R1: puño
 }
+
+
+# === Ventana de estado (tkinter) ===
+MODE_INFO = {                      # modo del robot -> (título, color de fondo)
+	0: ("Sin modo (inicio)", "#6b7280"),
+	1: ("Modo 1 · Locomoción", "#16a34a"),
+	2: ("Modo 2 · Control de brazos", "#2563eb"),
+	3: ("Modo 3 · Locomoción + brazos fijos", "#d97706"),
+}
+NO_SIGNAL = ("Sin señal de /mode", "#dc2626")
+CTRL_INFO = {                      # ctrl_arms -> (título, descripción, color de fondo)
+	1: ("1 · Ambos brazos", "Independientes: stick izq. = brazo izq., stick der. = brazo der.", "#0ea5e9"),
+	2: ("2 · Solo brazo izquierdo", "Posición + muñeca del brazo izquierdo", "#7c3aed"),
+	3: ("3 · Solo brazo derecho", "Posición + muñeca del brazo derecho", "#db2777"),
+	4: ("4 · Espejo", "Ambos brazos con los mandos del izquierdo; L2 / R1 = manos", "#0d9488"),
+}
+CTRL_IDLE = ("—", "El tipo de control de brazos solo aplica en el modo 2", "#9ca3af")
+
+
+class StatusWindow:
+	"""Ventana pequeña con el modo del robot y el tipo de control de brazos.
+
+	Corre en el hilo principal (tkinter lo exige) y solo LEE el estado del nodo cada 100 ms.
+	"""
+
+	def __init__(self, node, topmost=False, refresh_ms=100):
+		if tk is None:
+			raise RuntimeError("tkinter no está instalado (sudo apt install python3-tk)")
+		self.node = node
+		self.refresh_ms = refresh_ms
+		self.root = tk.Tk()                      # falla si no hay pantalla (DISPLAY)
+		self.root.title("G1 · Estado del teleop")
+		self.root.geometry("460x270")
+		self.root.resizable(False, False)
+		self.root.configure(bg="#111827")
+		if topmost:
+			self.root.attributes("-topmost", True)
+
+		def title(text):
+			return tk.Label(self.root, text=text, bg="#111827", fg="#9ca3af",
+							font=("Helvetica", 10, "bold"), anchor="w")
+
+		title("MODO DEL ROBOT").pack(fill="x", padx=16, pady=(14, 2))
+		self.mode_label = tk.Label(self.root, text="", fg="white", font=("Helvetica", 17, "bold"), pady=12)
+		self.mode_label.pack(fill="x", padx=16)
+
+		title("CONTROL DE BRAZOS").pack(fill="x", padx=16, pady=(14, 2))
+		self.ctrl_label = tk.Label(self.root, text="", fg="white", font=("Helvetica", 17, "bold"), pady=12)
+		self.ctrl_label.pack(fill="x", padx=16)
+		self.ctrl_desc = tk.Label(self.root, text="", bg="#111827", fg="#d1d5db", font=("Helvetica", 10))
+		self.ctrl_desc.pack(fill="x", padx=16, pady=(4, 0))
+
+		self._shown = None
+		self._interrupted = False
+		self.root.report_callback_exception = self._on_callback_exception
+
+	def _refresh(self):
+		if not rclpy.ok():                       # Ctrl+C u otro cierre del contexto ROS
+			self.root.quit()
+			return
+		mode, ctrl_arms, fresh = self.node.get_display_state()
+		state = (mode, ctrl_arms, fresh)
+		if state != self._shown:                 # solo se redibuja cuando cambia algo
+			self._shown = state
+			text, color = MODE_INFO.get(mode, (f"Modo {mode}", "#6b7280")) if fresh else NO_SIGNAL
+			self.mode_label.configure(text=text, bg=color)
+			if fresh and mode == self.node.arm_mode_value:
+				title_c, desc, color_c = CTRL_INFO.get(ctrl_arms, (str(ctrl_arms), "", "#6b7280"))
+			else:
+				title_c, desc, color_c = CTRL_IDLE
+			self.ctrl_label.configure(text=title_c, bg=color_c)
+			self.ctrl_desc.configure(text=desc)
+		self.root.after(self.refresh_ms, self._refresh)
+
+	def _on_callback_exception(self, exc, val, tb):
+		# tkinter se traga las excepciones de sus callbacks, también Ctrl+C: lo convertimos en salida
+		if exc is KeyboardInterrupt:
+			self._interrupted = True
+			self.root.quit()
+		else:
+			traceback.print_exception(exc, val, tb)
+
+	def run(self):
+		"""Bloquea hasta que se cierra la ventana (cerrarla NO detiene el teleop). Ctrl+C sí lo detiene."""
+		self.root.after(0, self._refresh)
+		try:
+			self.root.mainloop()
+		finally:
+			try:
+				self.root.destroy()
+			except Exception:
+				pass
+		if self._interrupted:
+			raise KeyboardInterrupt
 
 
 class ArmsTeleop(Node):
@@ -69,6 +171,8 @@ class ArmsTeleop(Node):
 		self.declare_parameter("hand_state_topic_left", "/lf/dex3/left/state")
 		self.declare_parameter("hand_state_topic_right", "/lf/dex3/right/state")
 		self.declare_parameter("z_speed_scale", 0.5)      # factor de velocidad del eje z 
+		self.declare_parameter("show_window", True)       # ventana con el modo y el tipo de control de brazos
+		self.declare_parameter("window_topmost", False)   # mantener la ventana siempre por encima
 
 
 		self.arm_mode_value = self.get_parameter("arm_mode_value").value
@@ -90,11 +194,14 @@ class ArmsTeleop(Node):
 		self.button_circle = self.get_parameter("button_circle").value
 		self.angular_speed = self.get_parameter("angular_speed").value
 		self.z_speed_scale = self.get_parameter("z_speed_scale").value
+		self.show_window = bool(self.get_parameter("show_window").value)
+		self.window_topmost = bool(self.get_parameter("window_topmost").value)
 		self.mirror_angular_signs = [float(v) for v in self.get_parameter("mirror_angular_signs").value]
 		if len(self.mirror_angular_signs) != 3:
 			raise ValueError("mirror_angular_signs debe tener 3 valores (roll, pitch, yaw)")
 
 		self.mode = 0
+		self.mode_time = None         # instante (monotonic) del último /mode recibido
 		self.last_joy_time = 0.0
 		self.left_input = [0.0, 0.0, 0.0]
 		self.right_input = [0.0, 0.0, 0.0]
@@ -110,6 +217,9 @@ class ArmsTeleop(Node):
 		self.velocity_pub = self.create_publisher(
     		MultiDOFJointTrajectory, "arm_cartesian_velocities", 10
 		)
+
+		self.command_pub = self.create_publisher(String, "/ref_points/cmd", 10)
+		self.prev_dpad_v = 0.0
 
 		self._init_hands()
 		
@@ -376,8 +486,8 @@ class ArmsTeleop(Node):
 			return
 
 		wrist = [
-			float(circle - square),    # pitch (cuadrado +, círculo -)
-			float(cross - triangle),   # roll  (triángulo -, X +)
+			float(circle - square),   # roll  (triángulo +, X -)
+			float(cross - triangle),    # pitch (cuadrado +, círculo -)
 			dpad_h,                    # yaw   (cruceta izquierda +, derecha -)
 		]
 		if self.ctrl_arms == 2:
@@ -388,13 +498,41 @@ class ArmsTeleop(Node):
 			self.right_ang = wrist
 		else:
 			# Modo 4 (espejo): mandos del brazo izquierdo; el derecho es su imagen en el plano x-z
-			self.left_input = [stick_left[0], stick_left[1], dpad_v]
-			self.right_input = [stick_left[0], -stick_left[1], dpad_v]        # x y z iguales, y opuesta
+			self.left_input = [stick_left[0], stick_left[1], stick_right[0]]
+			self.right_input = [stick_left[0], -stick_left[1], stick_right[0]]        # x y z iguales, y opuesta
 			self.left_ang = wrist
 			self.right_ang = [s * w for s, w in zip(self.mirror_angular_signs, wrist)]
 
+			# Disparar comandos de arrastre/agarre con la flecha arriba/abajo
+			dpad_raw = self._read_axis(msg, self.axis_dpad_vertical)
+			
+			if dpad_raw > 0.5 and self.prev_dpad_v <= 0.5:
+				self.command_pub.publish(String(data="arrastre"))
+				self.get_logger().info("Solicitando trayectoria: arrastre")
+			elif dpad_raw < -0.5 and self.prev_dpad_v >= -0.5:
+				self.command_pub.publish(String(data="agarre"))
+				self.get_logger().info("Solicitando trayectoria: agarre")
+				
+			self.prev_dpad_v = dpad_raw
+
+	def get_display_state(self):
+		"""(modo, ctrl_arms, /mode reciente?) para la ventana. Solo lectura."""
+		fresh = self.mode_time is not None and time.monotonic() - self.mode_time <= 1.0
+		return self.mode, self.ctrl_arms, fresh
+
+	def create_status_window(self):
+		"""Ventana de estado, o None si está desactivada o no se puede abrir (sin pantalla/tkinter)."""
+		if not self.show_window:
+			return None
+		try:
+			return StatusWindow(self, topmost=self.window_topmost)
+		except Exception as exc:
+			self.get_logger().warning(f"No se pudo abrir la ventana de estado: {exc}. El teleop sigue sin ella.")
+			return None
+
 	def mode_callback(self, msg):
 		self.mode = msg.data
+		self.mode_time = time.monotonic()
 		if self.mode != self.arm_mode_value:
 			self._zero_inputs()
 			self.ctrl_arms = 1
@@ -433,12 +571,28 @@ class ArmsTeleop(Node):
 def main(args=None):
 	rclpy.init(args=args)
 	node = None
+	executor = None
 	try:
 		node = ArmsTeleop()
-		rclpy.spin(node)
+		window = node.create_status_window()
+		if window is None:
+			rclpy.spin(node)
+		else:
+			# tkinter debe ir en el hilo principal: ROS gira en un hilo aparte
+			executor = SingleThreadedExecutor()
+			executor.add_node(node)
+			spin_thread = threading.Thread(target=executor.spin, daemon=True)
+			spin_thread.start()
+			window.run()
+			if rclpy.ok():                       # ventana cerrada a mano: el teleop sigue funcionando
+				node.get_logger().info("Ventana cerrada; el teleop sigue activo (Ctrl+C para salir)")
+				while rclpy.ok() and spin_thread.is_alive():
+					spin_thread.join(0.5)
 	except KeyboardInterrupt:
 		pass
 	finally:
+		if executor is not None:
+			executor.shutdown()
 		if node is not None:
 			node.release_hands()
 			node.destroy_node()
@@ -448,4 +602,3 @@ def main(args=None):
 
 if __name__ == "__main__":
 	main()
-

@@ -29,8 +29,8 @@ endif()
 ament_python_install_package(scripts)
 
 install(PROGRAMS
-  # scripts/head_stream.py
-  # scripts/skills.py
+  #scripts/ref_points.py
+  scripts/pick_drag.py
   # scripts/tf_republish.py
   # scripts/teleop.py
   # scripts/wheel_odom_fix.py
